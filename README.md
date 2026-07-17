@@ -28,11 +28,8 @@
 # --- CONFIGURATION VARIABLES (EDIT THESE) ---
 # #!/bin/bash
 
-# Delete primer-trimmed reads
+rm -rf unmergedr unmergedf/ merged/ 2>/dev/null && echo "Cleanup done"
 
-#
-#
-rm -rf merged unmergedf unmergedr otu
 
 # Primers
 PRIMER_FWD="GGWACWGGWTGAACWGTWTAYCCYCC"
@@ -176,8 +173,7 @@ cat all.otus.merged.fasta all.otus.unmergedf.fasta > merged_plus_forward.fasta
 
 grep "#" all.tab_otus.merged.txt > CHECK.TXT && grep "#" all.tab_otus.unmergedf.txt >> CHECK.TXT
 
-rm -f ptrim_*.fastq *.notmergedforward.fastq *.notmergedforward.filtered.fasta *.merged.fastq *.filtered.fasta && rmdir unmergedr 2>/dev/null && echo "Cleanup done"
-
+rm -f ptrim_*.fastq *.notmergedforward.fastq *.notmergedforward.filtered.fasta *.merged.fastq *.filtered.fasta 
 
 ```
 
@@ -393,6 +389,69 @@ write.csv(track, file = track_path, row.names = TRUE)
 print(paste("Tracking stats exported to:", track_path))
 
 ```
+
+
+```bash
+
+# Run MMseqs2 search - top hit only
+mmseqs easy-search ASVs.fasta all.otus.merged.fasta results.tsv tmp/ \
+  --min-seq-id 0.99 -c 0.9 --cov-mode 0 --threads 8 --search-type 3 \
+  --max-seqs 1 \
+  --format-output "query,target,pident,qcov,tcov,alnlen,mismatch,evalue,bits,qseq,tseq"
+
+# Get matched/unmatched IDs
+cut -f1 results.tsv | sort -u > hit_asvs.txt
+cut -f2 results.tsv | sort -u > hit_otus.txt
+
+seqkit seq -n ASVs.fasta            | awk '{print $1}' | sort -u > all_asvs.txt
+seqkit seq -n all.otus.merged.fasta | awk '{print $1}' | sort -u > all_otus.txt
+
+comm -23 all_asvs.txt hit_asvs.txt > specific_asvs.txt
+comm -23 all_otus.txt hit_otus.txt > specific_otus.txt
+
+# Extract sequences
+seqkit grep -f hit_asvs.txt ASVs.fasta > shared_ASVs.fasta
+seqkit grep -f hit_otus.txt all.otus.merged.fasta > shared_OTUs.fasta
+seqkit grep -f specific_asvs.txt ASVs.fasta > specific_ASVs.fasta
+seqkit grep -f specific_otus.txt all.otus.merged.fasta > specific_OTUs.fasta
+
+# Stats
+TOTAL_ASVS=$(seqkit stats -T ASVs.fasta            | awk 'NR==2{print $4}')
+TOTAL_OTUS=$(seqkit stats -T all.otus.merged.fasta | awk 'NR==2{print $4}')
+SHARED_ASVS=$(seqkit stats -T shared_ASVs.fasta    | awk 'NR==2{print $4}')
+SHARED_OTUS=$(seqkit stats -T shared_OTUs.fasta    | awk 'NR==2{print $4}')
+SPEC_ASVS=$(seqkit stats -T specific_ASVs.fasta    | awk 'NR==2{print $4}')
+SPEC_OTUS=$(seqkit stats -T specific_OTUs.fasta    | awk 'NR==2{print $4}')
+TOTAL_HITS=$(wc -l < results.tsv)
+
+{
+echo "============================================"
+echo "         SEARCH STATS (TOP HIT ONLY)        "
+echo "============================================"
+echo "Total ASVs (query):              $TOTAL_ASVS"
+echo "Total OTUs (target):             $TOTAL_OTUS"
+echo "Total hits in results.tsv:       $TOTAL_HITS"
+echo "--------------------------------------------"
+echo "Shared ASVs  (matched):          $SHARED_ASVS / $TOTAL_ASVS"
+echo "Shared OTUs  (matched):          $SHARED_OTUS / $TOTAL_OTUS"
+echo "Specific to ASVs (no hit):       $SPEC_ASVS   / $TOTAL_ASVS"
+echo "Specific to OTUs (never hit):    $SPEC_OTUS   / $TOTAL_OTUS"
+echo "--------------------------------------------"
+printf "ASV match rate:                  %.1f%%\n" "$(echo "$SHARED_ASVS $TOTAL_ASVS" | awk '{printf "%.1f", $1/$2*100}')"
+printf "OTU match rate:                  %.1f%%\n" "$(echo "$SHARED_OTUS $TOTAL_OTUS" | awk '{printf "%.1f", $1/$2*100}')"
+echo "============================================"
+} | tee reciprocal.txt
+
+# Cleanup
+rm hit_asvs.txt hit_otus.txt all_asvs.txt all_otus.txt
+
+
+```
+
+
+
+
+
 
 
 
